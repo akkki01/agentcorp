@@ -22,10 +22,23 @@ let live = false;
 
 beforeAll(async () => {
   try {
-    await getPool().query("SELECT 1");
+    // Second line of defence behind tests/setup-db.ts: if that setup file is
+    // ever dropped from the vitest config, refuse to run rather than truncate
+    // a developer's database.
+    const { rows } = await getPool().query<{ name: string }>(
+      "SELECT current_database() AS name",
+    );
+    const name = rows[0]?.name ?? "";
+    if (!name.endsWith("_test")) {
+      throw new Error(
+        `refusing to run destructive tests against "${name}"; this suite ` +
+          `truncates every table and must only touch a *_test database`,
+      );
+    }
     await migrate();
     live = true;
-  } catch {
+  } catch (error) {
+    if ((error as Error).message.startsWith("refusing")) throw error;
     live = false;
   }
 });

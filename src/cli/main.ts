@@ -8,9 +8,11 @@ import { marginToDate, monthToDateSpend, spendByRole } from "../ledger/ledger.js
 import { ALL_ROLES, getRole } from "../roles/registry.js";
 import { runPass } from "../runner/supervisor.js";
 import { workOnce } from "../runner/worker.js";
-import { approveByHuman, insertTicket, listTickets } from "../tickets/store.js";
+import {
+  approveByHuman, insertTicket, listTickets, transitionTicket,
+} from "../tickets/store.js";
 import type { Loop } from "../roles/types.js";
-import type { TicketType } from "../tickets/types.js";
+import type { TicketState, TicketType } from "../tickets/types.js";
 
 const usd = (n: number): string => `$${n.toFixed(2)}`;
 
@@ -21,6 +23,7 @@ const USAGE = `agentcorp -- a multi-agent company runtime
   status                         Controls, month-to-date spend, and margin
   tickets [state]                List tickets
   file <type> <role> <title>     File a ticket as the human operator
+  move <ticket-id> <state>       Move a ticket (proposed -> approved queues it)
   approve <ticket-id>            Grant human approval to a gated ticket
   pause <reason> | resume        Halt or restart every loop
   work <role>                    Run one turn for one role
@@ -112,7 +115,27 @@ const main = async (argv: readonly string[]): Promise<number> => {
         createdBy: "human",
       });
       console.log(`filed #${ticket.id} -> ${role} (${usd(ticket.budgetUsd)})`);
-      console.log(`it is "proposed"; approve it into the queue with: agentcorp tickets`);
+      console.log(
+        `it is "proposed" and not yet claimable; queue it with:\n` +
+          `  agentcorp move ${ticket.id} approved`,
+      );
+      return 0;
+    }
+
+    case "move": {
+      const id = Number(rest[0]);
+      const to = rest[1];
+      if (!Number.isInteger(id) || to === undefined) {
+        console.error("usage: move <ticket-id> <state>");
+        return 1;
+      }
+      const ticket = await transitionTicket(id, to as TicketState, "human", {
+        note: "moved by the human operator from the CLI",
+      });
+      console.log(`#${ticket.id} -> ${ticket.state}`);
+      if (ticket.state === "approved") {
+        console.log(`claimable now by ${ticket.ownerRole}: agentcorp work ${ticket.ownerRole}`);
+      }
       return 0;
     }
 

@@ -1,5 +1,26 @@
 /** Process configuration, read once at startup and frozen. */
 
+/**
+ * Load `.env` if it exists, before any value is read.
+ *
+ * Without this the documented setup step (`cp .env.example .env`) silently does
+ * nothing and every agent turn fails on a missing API key with no hint as to
+ * why. Real environment variables already present are NOT overwritten --
+ * `loadEnvFile` leaves them alone -- so CI and shell exports still win over a
+ * stale local file.
+ */
+const loadDotEnv = (): void => {
+  try {
+    process.loadEnvFile();
+  } catch {
+    // No .env file, or this runtime predates loadEnvFile (Node < 20.6). Either
+    // way the real environment is the source of truth; carry on.
+  }
+};
+
+loadDotEnv();
+
+
 const num = (key: string, fallback: number): number => {
   const raw = process.env[key];
   if (raw === undefined || raw === "") return fallback;

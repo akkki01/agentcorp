@@ -59,7 +59,7 @@ pnpm db:up          # Postgres 17 in Docker on port 5433
 pnpm db:migrate
 pnpm test           # 119 tests; DB-backed ones skip if no database is up
 
-cp .env.example .env   # set ANTHROPIC_API_KEY, or run `ant auth login`
+cp .env.example .env   # set ANTHROPIC_API_KEY (loaded automatically), or `ant auth login`
 
 npx tsx src/cli/main.ts roles     # the org chart
 npx tsx src/cli/main.ts status    # spend, revenue, margin, pause state
