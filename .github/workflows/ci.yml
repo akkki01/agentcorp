@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    # The integration suite skips itself when no database is reachable, which
+    # would let a real regression pass CI silently. Running Postgres here means
+    # all 119 tests actually execute.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: agentcorp
+          POSTGRES_PASSWORD: agentcorp
+          POSTGRES_DB: agentcorp
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U agentcorp"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    env:
+      # tests/setup-db.ts derives "<name>_test" from this and creates it on
+      # demand, so the suite never truncates the database named here.
+      DATABASE_URL: postgres://agentcorp:agentcorp@localhost:5432/agentcorp
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Migrate
+        run: pnpm db:migrate
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
