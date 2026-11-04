@@ -74,6 +74,30 @@ stalled.
 need a recursive CTE on every guardrail check, and the guardrail runs on every
 ticket creation.
 
+### Rubric versioning, and why old scores are not converted
+
+`ideas.scores` holds one object per idea and `assertScores` requires every
+dimension of the *current* rubric. When the rubric gained `errorTolerance` and
+`marketGap`, every stored score became incomplete — and there is no value that
+can be filled in for a dimension nobody judged:
+
+- A passing default re-shortlists precisely the ideas the new dimensions exist
+  to reject, including one where a wrong output is a failed audit. That is the
+  original bug, reintroduced by the migration meant to fix it.
+- A failing default silently discards ideas an analyst may already have
+  validated, and hides the fact that the rubric changed at all.
+
+So rows carry a `rubric_version` alongside their scores, migration `006` moves
+v1 scores into `superseded_scores` and rewinds the idea to `new`, and
+`promoteIdea` refuses a stale-rubric idea with `StaleRubricError` rather than
+trusting its state column. The `agentcorp ideas` listing prints a stale total as
+`--`, not as its old number: showing it next to current totals invites comparing
+two numbers produced by different rubrics, which is the mistake the version
+column exists to prevent.
+
+Re-scoring costs one cheap scout turn per idea. That is the price of the funnel
+having only one meaning at a time.
+
 ### Forecasts recomputed from stored assumptions
 
 `latestForecast` recomputes the projection from the stored assumptions rather
@@ -167,3 +191,22 @@ across repeated turns of the same role, something upstream is varying.
 - **Idea dedupe does not stem.** "parse" and "parsing" produce distinct keys.
   Stemming would catch more duplicates but collide genuinely different ideas,
   and a false collision silently discards a real find.
+- **The rubric cannot see cost of error or market saturation.** — **CLOSED by
+  rubric v2.** For the record of what the gap was: the five v1 dimensions had
+  no way to express "if we are wrong, the customer fails an audit", so an idea
+  needing a licensed human on every output scored 18.8 and shortlisted; and
+  saturation *raised* `demandEvidenced`, so the most crowded idea in a cohort
+  of 14 scored highest. v1 shortlisted 11 of 14 and three had to be overturned
+  by hand. `errorTolerance` and `marketGap` close it; both can veto, and the
+  threshold moved from 17 of 27.5 to 28 of 39. See
+  [Rubric versioning](#rubric-versioning-and-why-old-scores-are-not-converted).
+- **`marketGap` is scored from a search, not from data we hold.** A scout
+  judging saturation is reading a results page, which is a snapshot and is
+  geographically skewed by whoever is asking. It is still the best signal
+  available at scout cost, but it is the dimension most likely to be scored
+  wrong, and the one worth sampling when auditing a scout's calibration.
+- **Nothing grades the rubric itself.** `forecast_calibration` grades
+  forecasters against actuals; there is no equivalent for the funnel, so
+  "shortlisted ideas that survived the analyst" is a number an operator has to
+  compute by hand. Until it exists, a threshold change is argued from the 14
+  historical ideas rather than measured.

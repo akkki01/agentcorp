@@ -57,7 +57,7 @@ fall over for three reasons, and this repo is built around fixing them:
 pnpm install
 pnpm db:up          # Postgres 17 in Docker on port 5433
 pnpm db:migrate
-pnpm test           # 119 tests; DB-backed ones skip if no database is up
+pnpm test           # 136 tests; DB-backed ones skip if no database is up
 
 cp .env.example .env   # set ANTHROPIC_API_KEY (loaded automatically), or `ant auth login`
 
@@ -127,7 +127,7 @@ A dedicated two-stage funnel keeps idea generation from flooding the backlog:
 ```
 scout            breadth, cheap, runs often
   │ capture_idea     every idea needs a real source_ref — no source, no score
-  │ score_idea       5-dimension operability rubric, 0-5 each
+  │ score_idea       7-dimension operability rubric, 0-5 each
   ▼
 ideas table      state: new → scored → shortlisted → promoted
   │
@@ -144,15 +144,41 @@ agents actually run this":
 
 | Dimension | Weight | Question |
 |---|---|---|
-| `demandEvidenced` | 1.5 | Does someone already *pay* to solve this? |
+| `errorTolerance` | 1.5 | If we're wrong, what does it cost the customer? 5 = a glance; 0 = a lawsuit, penalty, or failed audit |
+| `marketGap` | 1.3 | Is this already well served? 5 = real unmet need; 0 = many incumbents, or any credible competitor that's free |
 | `selfServe` | 1.2 | Can a stranger pay with no human in the path? |
+| `demandEvidenced` | 1.2 | Does someone already *pay* to solve this? |
 | `machineShaped` | 1.0 | Data in, data out — no GUI to eyeball? |
-| `supportable` | 1.0 | Can docs answer >80% of tickets? |
+| `supportable` | 0.8 | Can docs answer >80% of tickets? |
 | `costKnowable` | 0.8 | Is cost per request calculable up front? |
 
 **Any dimension scoring ≤1 vetoes the idea regardless of total.** A product
 that scores 5 everywhere but can't be sold self-serve isn't a cheap fix — it's
-a different company.
+a different company. The same holds for the two dimensions that carry the most
+weight, and that is why they can veto rather than merely deduct: a regulator
+who penalises a wrong answer doesn't relent because the product improved, and
+nothing prices below free.
+
+**Shortlist threshold: 28 of a possible 39.** A straight-4 idea — solid
+everywhere, exceptional nowhere — scores 31.2 and passes; a straight-3 idea
+scores 23.4 and doesn't. From a straight-4 you can drop two light dimensions to
+a 3 and still clear the bar, but not three heavy ones. A scout is measured on
+how many shortlisted ideas survive validation, not on volume.
+
+> **Rubric v2.** v1 scored five dimensions with a bar of 17 of 27.5, and
+> shortlisted 11 of the first 14 real ideas — three of which a human had to
+> reject by hand. Each of those was something v1 could not say: that a wrong
+> certificate-of-insurance lookup is a failed audit (so a licensed human must
+> review every output), and that four vendors owning the first page of search
+> results is proof you *won't* be paid, not proof of demand. Saturation used to
+> raise `demandEvidenced`, which is how the most crowded idea in the cohort
+> scored highest. v2 passes 4 of those 14.
+>
+> **Scores recorded under v1 are not converted.** Migration `006` keeps them in
+> `superseded_scores`, clears `scores`, and moves the idea back to `new` to be
+> re-scored; `promote_idea` refuses a stale-rubric idea with `StaleRubricError`
+> and `agentcorp ideas` flags it. Defaulting the two new dimensions to a
+> passing value would re-shortlist exactly the ideas v2 exists to reject.
 
 ## The forecaster
 
@@ -272,7 +298,7 @@ Per-model details that matter and are easy to get wrong:
 
 | Component | State |
 |---|---|
-| Ticket substrate, state machine, leases | Working, 24 integration tests |
+| Ticket substrate, state machine, leases | Working, 30 integration tests |
 | Guardrails (authorship, depth, budget, pause, breaker) | Working |
 | Cost ledger + margin reporting | Working |
 | Idea funnel (scout → rubric → promote) | Working |
@@ -294,8 +320,8 @@ pnpm test
 pnpm db:reset     # nuke and rebuild the database
 ```
 
-119 tests. Pure logic (state machine, guardrails, pricing, rubric, projection
-maths, path sandbox) runs with no database; 24 integration tests skip
+136 tests. Pure logic (state machine, guardrails, pricing, rubric, projection
+maths, path sandbox) runs with no database; 30 integration tests skip
 automatically if Postgres isn't up.
 
 ## License

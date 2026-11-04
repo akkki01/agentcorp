@@ -2,7 +2,8 @@
 import { migrate } from "../db/migrate.js";
 import { closePool } from "../db/pool.js";
 import { readControls, setPaused } from "../guardrails/controls.js";
-import { listIdeas, shortlist } from "../ideas/store.js";
+import { listIdeas, shortlist, staleRubricIdeas } from "../ideas/store.js";
+import { RUBRIC_VERSION } from "../ideas/scoring.js";
 import { latestForecast } from "../forecast/store.js";
 import { marginToDate, monthToDateSpend, spendByRole } from "../ledger/ledger.js";
 import { ALL_ROLES, getRole } from "../roles/registry.js";
@@ -208,8 +209,21 @@ const main = async (argv: readonly string[]): Promise<number> => {
       for (const i of ideas) {
         console.log(
           `#${String(i.id).padEnd(5)} ${i.state.padEnd(12)} ` +
-            `${(i.totalScore?.toFixed(1) ?? "--").padStart(5)}  ` +
-            `${i.niche.padEnd(22)} ${i.title}`,
+            // A stale score prints as "--" rather than its old number. Showing
+            // the v1 total next to v2 totals invites comparing them, which is
+            // the whole mistake: it was produced by a rubric that could not ask
+            // what being wrong costs.
+            `${(i.needsRescore ? "--" : i.totalScore?.toFixed(1) ?? "--").padStart(5)}  ` +
+            `${i.niche.padEnd(22)} ${i.title}` +
+            (i.needsRescore ? `  [rubric v${i.rubricVersion}, needs re-score]` : ""),
+        );
+      }
+      const stale = await staleRubricIdeas();
+      if (stale.length > 0) {
+        console.log(
+          `\n${stale.length} idea(s) scored under an older rubric ` +
+            `(current is v${RUBRIC_VERSION}) and cannot be promoted until ` +
+            `re-scored -- run: agentcorp work scout`,
         );
       }
       return 0;

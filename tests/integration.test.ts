@@ -5,7 +5,12 @@ import { haltReason, readControls, setPaused } from "../src/guardrails/controls.
 import {
   recordRoleFailure, recordRoleSuccess, isRoleTripped,
 } from "../src/guardrails/controls.js";
-import { captureIdea, promoteIdea, scoreIdea } from "../src/ideas/store.js";
+import {
+  captureIdea, listIdeas, promoteIdea, scoreIdea, staleRubricIdeas,
+} from "../src/ideas/store.js";
+import {
+  InvalidScoreError, RUBRIC_VERSION, StaleRubricError,
+} from "../src/ideas/scoring.js";
 import { recordActual, recordForecast } from "../src/forecast/store.js";
 import { marginToDate, recordSpend, ticketSpend } from "../src/ledger/ledger.js";
 import { claimNextTicket, reapExpiredLeases } from "../src/tickets/lease.js";
@@ -271,6 +276,7 @@ describe("the idea funnel", () => {
     const { verdict } = await scoreIdea(captured.id, {
       selfServe: 5, machineShaped: 5, supportable: 4,
       costKnowable: 4, demandEvidenced: 4,
+      errorTolerance: 5, marketGap: 4,
     });
     expect(verdict.shortlisted).toBe(true);
 
@@ -294,10 +300,124 @@ describe("the idea funnel", () => {
     await scoreIdea(captured.id, {
       selfServe: 1, machineShaped: 5, supportable: 5,
       costKnowable: 5, demandEvidenced: 5,
+      errorTolerance: 5, marketGap: 5,
     });
     await expect(promoteIdea(captured.id, "analyst")).rejects.toThrow(
       /only shortlisted ideas/,
     );
+  });
+
+  it("rejects an idea whose wrong answer costs an audit, and records why", async () => {
+    // The COI-tracking defect end to end: strong on everything the v1 rubric
+    // could see, and still unfit because a human must sign off on every output.
+    const { idea: captured } = await captureIdea({
+      ...idea,
+      title: "Certificate of insurance lapse tracking for GCs",
+    });
+    const { idea: scored, verdict } = await scoreIdea(captured.id, {
+      selfServe: 5, machineShaped: 5, supportable: 5,
+      costKnowable: 5, demandEvidenced: 5,
+      errorTolerance: 0, marketGap: 4,
+    });
+    expect(verdict.shortlisted).toBe(false);
+    expect(verdict.vetoedBy).toContain("errorTolerance");
+    expect(scored.state).toBe("rejected");
+    // The reason is persisted, so the rejection is auditable rather than a
+    // number an operator has to re-derive.
+    expect(scored.rejectedReason).toMatch(/errorTolerance/);
+    expect(scored.needsRescore).toBe(false);
+    await expect(promoteIdea(captured.id, "analyst")).rejects.toThrow(
+      /only shortlisted ideas/,
+    );
+  });
+
+  it("refuses an incomplete score set instead of defaulting the new dimensions", async () => {
+    const { idea: captured } = await captureIdea(idea);
+    await expect(
+      // A v1-shaped call, as the old score_idea tool would have made it.
+      scoreIdea(captured.id, {
+        selfServe: 5, machineShaped: 5, supportable: 5,
+        costKnowable: 5, demandEvidenced: 5,
+      }),
+    ).rejects.toThrow(InvalidScoreError);
+
+    const [row] = await listIdeas({ limit: 1 });
+    expect(row?.state).toBe("new");
+    expect(row?.totalScore).toBeNull();
+  });
+});
+
+describe("ideas scored under a retired rubric", () => {
+  const idea = {
+    title: "Certificate of insurance lapse tracking",
+    hypothesis: "GCs chase subcontractor certificates by hand.",
+    niche: "construction",
+    sourceKind: "forum",
+    sourceRef: "https://example.com/thread/9",
+    foundBy: "scout",
+  };
+
+  /**
+   * Puts a row into the exact state migration 006 was written for: a complete
+   * five-dimension score, shortlisted, stamped rubric v1. Written through SQL
+   * because `scoreIdea` can no longer produce one -- which is the point.
+   */
+  const withV1Score = async (): Promise<number> => {
+    const { idea: captured } = await captureIdea(idea);
+    await getPool().query(
+      `UPDATE ideas
+          SET scores = $2::jsonb, total_score = 18.8,
+              state = 'shortlisted', rubric_version = 1
+        WHERE id = $1`,
+      [
+        captured.id,
+        JSON.stringify({
+          selfServe: 4, machineShaped: 4, supportable: 4,
+          costKnowable: 4, demandEvidenced: 2,
+        }),
+      ],
+    );
+    return captured.id;
+  };
+
+  it("flags a v1 score as needing re-score instead of treating it as current", async () => {
+    const id = await withV1Score();
+    const [row] = await listIdeas({ limit: 1 });
+    expect(row?.id).toBe(id);
+    expect(row?.rubricVersion).toBe(1);
+    expect(row?.needsRescore).toBe(true);
+    expect(await staleRubricIdeas()).toHaveLength(1);
+  });
+
+  it("refuses to promote a v1-scored idea even when its state says shortlisted", async () => {
+    const id = await withV1Score();
+    // This is the honest-handling requirement: the idea has no errorTolerance
+    // score, and there is no value we may invent for it.
+    await expect(promoteIdea(id, "analyst")).rejects.toThrow(StaleRubricError);
+    await expect(promoteIdea(id, "analyst")).rejects.toThrow(/re-score it/);
+  });
+
+  it("clears the flag only when every current dimension is re-scored", async () => {
+    const id = await withV1Score();
+    await scoreIdea(id, {
+      selfServe: 4, machineShaped: 4, supportable: 4,
+      costKnowable: 4, demandEvidenced: 2,
+      errorTolerance: 0, marketGap: 3,
+    });
+    const [row] = await listIdeas({ limit: 1 });
+    expect(row?.rubricVersion).toBe(RUBRIC_VERSION);
+    expect(row?.needsRescore).toBe(false);
+    // Re-scored under v2 it is a rejection, not the shortlist it used to be.
+    expect(row?.state).toBe("rejected");
+    expect(await staleRubricIdeas()).toHaveLength(0);
+  });
+
+  it("leaves a never-scored idea unflagged -- new is not stale", async () => {
+    await captureIdea(idea);
+    const [row] = await listIdeas({ limit: 1 });
+    expect(row?.state).toBe("new");
+    expect(row?.rubricVersion).toBe(RUBRIC_VERSION);
+    expect(row?.needsRescore).toBe(false);
   });
 });
 

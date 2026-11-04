@@ -12,7 +12,7 @@ ESM, Postgres 17, Vitest.
 pnpm typecheck && pnpm test
 ```
 
-119 tests. Pure-logic tests run without a database; 24 integration tests skip if
+136 tests. Pure-logic tests run without a database; 30 integration tests skip if
 Postgres is not reachable. Bring it up with `pnpm db:up && pnpm db:migrate`.
 
 ## Invariants — do not break these
@@ -27,6 +27,12 @@ Postgres is not reachable. Bring it up with `pnpm db:up && pnpm db:migrate`.
   terms, pricing.
 - **`src/runner/repo.ts` is read-only and sandboxed.** Resolve-then-compare
   against the repo root; never string-match for `..`.
+- **`assertScores` requires every rubric dimension and defaults none.** A
+  missing `errorTolerance` or `marketGap` is a failed tool call, not a 0 and not
+  a 5. Scores from a retired rubric are refused (`StaleRubricError`), never
+  topped up — that silent default is the bug rubric v2 exists to fix.
+- **`errorTolerance` and `marketGap` are veto-capable, not just heavy.** A high
+  total must not be able to outvote them. See `src/ideas/scoring.ts`.
 
 ## Model-specific gotchas already handled — do not "simplify" these away
 

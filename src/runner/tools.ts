@@ -289,39 +289,80 @@ const TOOLS: Record<string, CompanyTool> = {
     definition: {
       name: "score_idea",
       description:
-        "Score an idea 0-5 on each rubric dimension. Any dimension at or below 1 vetoes " +
-        "the idea outright. Score harshly: you are measured on survival rate, not volume.",
+        "Score an idea 0-5 on EVERY rubric dimension; all seven are required and there " +
+        "is no default. Any dimension at or below 1 vetoes the idea outright, however " +
+        "high the total -- a veto means the problem is structural, not a gap effort " +
+        "closes. errorTolerance and marketGap are where most honest rejections happen: " +
+        "an idea whose wrong answer costs an audit needs a licensed human on every " +
+        "output, and an idea with a free incumbent cannot be priced. Score harshly: you " +
+        "are measured on the share of your shortlisted ideas that survive the analyst, " +
+        "not on volume. An idea already scored under an older rubric should be re-scored " +
+        "in full, not topped up.",
       input_schema: {
         type: "object",
         properties: {
           idea_id: { type: "integer" },
+          errorTolerance: {
+            type: "integer",
+            description:
+              "If the product is wrong, what does it cost the customer? 5 = a glance or " +
+              "an hour of rework. 3 = an embarrassing but reversible mistake. 0-1 = a " +
+              "lawsuit, regulatory penalty, failed audit, or medical or financial harm " +
+              "-- score 0-1 whenever a human would have to review every output, which " +
+              "vetoes the idea.",
+          },
+          marketGap: {
+            type: "integer",
+            description:
+              "Is this already well served? 5 = a real unmet need with no credible " +
+              "incumbent. 3 = incumbents exist but visibly underserve this segment. " +
+              "0-1 = many incumbents, or ANY credible competitor offering it free -- you " +
+              "cannot undercut free, so score 0-1 and accept the veto. Search before you " +
+              "score; a crowded first page of results is a 0-1, not evidence of demand.",
+          },
           selfServe: { type: "integer", description: "Can a stranger pay with no human involved?" },
+          demandEvidenced: {
+            type: "integer",
+            description:
+              "Does someone already pay to solve this? Paying competitors count here, " +
+              "but score the saturation they imply in marketGap -- do not spend the " +
+              "same observation twice.",
+          },
           machineShaped: { type: "integer", description: "Data in, data out, no GUI needed?" },
           supportable: { type: "integer", description: "Can docs answer most tickets?" },
           costKnowable: { type: "integer", description: "Is cost per request calculable?" },
-          demandEvidenced: { type: "integer", description: "Does someone already pay to solve this?" },
         },
         required: [
-          "idea_id", "selfServe", "machineShaped",
-          "supportable", "costKnowable", "demandEvidenced",
+          "idea_id", "errorTolerance", "marketGap", "selfServe",
+          "demandEvidenced", "machineShaped", "supportable", "costKnowable",
         ],
         additionalProperties: false,
       },
     },
     handler: async (input) =>
+      // Every dimension is read with `int`, which throws on a missing key. No
+      // `?? 0` and no `?? 5`: a dimension the model declined to score is a
+      // failed tool call, not a passing default. v1 had no errorTolerance at
+      // all, and the result was an idea requiring human sign-off reaching the
+      // shortlist with the top score in its cohort.
       scoreIdea(int(input, "idea_id"), {
+        errorTolerance: int(input, "errorTolerance"),
+        marketGap: int(input, "marketGap"),
         selfServe: int(input, "selfServe"),
+        demandEvidenced: int(input, "demandEvidenced"),
         machineShaped: int(input, "machineShaped"),
         supportable: int(input, "supportable"),
         costKnowable: int(input, "costKnowable"),
-        demandEvidenced: int(input, "demandEvidenced"),
       }),
   },
 
   list_ideas: {
     definition: {
       name: "list_ideas",
-      description: "List ideas, highest score first. Filter by state to see the shortlist.",
+      description:
+        "List ideas, highest score first. Filter by state to see the shortlist. An idea " +
+        "with needs_rescore true was scored under an older rubric: its total is not " +
+        "comparable to anything current and it cannot be promoted until re-scored.",
       input_schema: {
         type: "object",
         properties: {
