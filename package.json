@@ -1,0 +1,37 @@
+{
+  "name": "agentcorp",
+  "version": "0.1.0",
+  "private": false,
+  "description": "A multi-agent operating system for running a SaaS company: typed tickets, dollar-budgeted agents, and a cost ledger that reconciles LLM spend against revenue.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "agentcorp": "./dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "db:up": "docker compose up -d && node scripts/wait-for-db.mjs",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && pnpm db:up && pnpm db:migrate"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
+    "pg": "^8.13.1",
+    "stripe": "^17.5.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
