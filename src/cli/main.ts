@@ -7,6 +7,7 @@ import { latestForecast } from "../forecast/store.js";
 import { marginToDate, monthToDateSpend, spendByRole } from "../ledger/ledger.js";
 import { ALL_ROLES, getRole } from "../roles/registry.js";
 import { runPass } from "../runner/supervisor.js";
+import { runScoutSweep } from "../runner/scout.js";
 import { workOnce } from "../runner/worker.js";
 import {
   approveByHuman, insertTicket, listTickets, transitionTicket,
@@ -28,6 +29,7 @@ const USAGE = `agentcorp -- a multi-agent company runtime
   pause <reason> | resume        Halt or restart every loop
   work <role>                    Run one turn for one role
   pass [strategy|build|revenue]  Run one supervisor pass
+  scout "<brief>"                Run a scout sweep via the Claude Code CLI
   ideas [state]                  List ideas, best first
   shortlist                      Ideas that cleared the rubric
   forecast <idea-id>             Show the growth projection for an idea
@@ -192,6 +194,26 @@ const main = async (argv: readonly string[]): Promise<number> => {
           (outcome.kind === "failed" ? ` #${outcome.ticketId} ${outcome.error}` : ""));
       }
       console.log(`pass cost: ${usd(report.totalCostUsd)}`);
+      return 0;
+    }
+
+    case "scout": {
+      const brief = rest.join(" ");
+      if (brief === "") {
+        console.error('usage: scout "<what to sweep for>"');
+        return 1;
+      }
+      console.log("running scout via the Claude Code CLI harness (no API key needed)...\n");
+      const r = await runScoutSweep(brief);
+      console.log(r.rows.join("\n"));
+      if (r.skipped.length > 0) {
+        console.log(`\nskipped ${r.skipped.length}:`);
+        for (const s of r.skipped) console.log(`  - ${s}`);
+      }
+      console.log(
+        `\ncaptured ${r.captured} | new ${r.fresh} | shortlisted ${r.shortlisted} ` +
+          `| vetoed ${r.rejected} | cost ${usd(r.costUsd)}`,
+      );
       return 0;
     }
 
