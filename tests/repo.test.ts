@@ -5,7 +5,13 @@ import {
 
 describe("repo sandbox", () => {
   test("resolves a path inside the repo", () => {
-    expect(safeResolve("package.json")).toMatch(/agentcorp\/package\.json$/);
+    // Asserted against the actual root rather than a hardcoded directory
+    // name: the old version matched /agentcorp\/package\.json$/ and broke the
+    // moment the suite ran from a git worktree, which is a property of the
+    // checkout, not of the sandbox being tested.
+    const resolved = safeResolve("package.json");
+    expect(resolved.endsWith("/package.json")).toBe(true);
+    expect(resolved.startsWith(process.cwd())).toBe(true);
   });
 
   test("blocks a relative traversal out of the repo", () => {
