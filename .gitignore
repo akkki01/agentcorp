@@ -6,3 +6,6 @@ coverage/
 *.log
 .DS_Store
 .vitest/
+
+# Agent worktrees are local scratch, not project content.
+.claude/worktrees/
